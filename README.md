@@ -5,7 +5,9 @@
 ## 功能
 
 - 🔄 自動抓取 Ollama 帳號用量 (不需複雜瀏覽器自動化，完全繞過 CAPTCHA 阻擋)
+- ⏳ 支援擷取 Session 與 Weekly 的用量及重置剩餘時間 (Resets in...)
 - 📊 提供 Prometheus metrics 端點 (`/metrics`) 以及視覺化網頁儀表板
+- 🕰️ 儀表板時間採用 24 小時制並自動轉換為台北時區 (UTC+8)
 - 🔐 支援多帳號監控，且可透過 JSON 格式輕鬆設定 Cookie
 - ⏱️ 支援環境變數自訂背景爬取頻率與前端重新整理秒數
 - 🐳 極致輕量的 Docker 映像檔 (`python:3.11-slim`)
