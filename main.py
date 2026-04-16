@@ -1,6 +1,6 @@
 import os, re, json, time, threading, traceback, sys
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from http.cookiejar import MozillaCookieJar
 from io import StringIO
 
@@ -13,6 +13,10 @@ from fastapi import FastAPI
 from fastapi.responses import Response, HTMLResponse
 import requests
 from prometheus_client import generate_latest, Gauge, CONTENT_TYPE_LATEST
+
+def get_taipei_time():
+    taipei_tz = timezone(timedelta(hours=8))
+    return datetime.now(taipei_tz).strftime('%Y-%m-%d %H:%M:%S')
 
 
 @asynccontextmanager
@@ -136,8 +140,14 @@ def fetch_usage(session, account_name):
         s_pct = float(s.group(1)) if s else None
         w_pct = float(w.group(1)) if w else None
 
+        s_res = re.search(r"Session usage.{0,100}?Resets in\s+([0-9.]+\s+[a-zA-Z]+)", clean, re.IGNORECASE)
+        w_res = re.search(r"Weekly usage.{0,100}?Resets in\s+([0-9.]+\s+[a-zA-Z]+)", clean, re.IGNORECASE)
+
+        s_reset = s_res.group(1) if s_res else None
+        w_reset = w_res.group(1) if w_res else None
+
         if s_pct is not None or w_pct is not None:
-            return {"session": s_pct, "weekly": w_pct}
+            return {"session": s_pct, "weekly": w_pct, "s_reset": s_reset, "w_reset": w_reset}
 
         # 輸出頁面內容以供除錯（去除 HTML 標籤）
         preview = clean[:800]
@@ -162,7 +172,8 @@ def run_scraper():
                 status_g.labels(account=name).set(0)
                 USAGE_CACHE[name] = {
                     "session": None, "weekly": None,
-                    "updated": datetime.now().isoformat(), "status": "error",
+                    "s_reset": None, "w_reset": None,
+                    "updated": get_taipei_time(), "status": "error",
                     "error": f"OLLAMA_COOKIES_{name} not set"
                 }
                 continue
@@ -171,20 +182,24 @@ def run_scraper():
             if usage_data:
                 s_pct = usage_data.get("session") or 0.0
                 w_pct = usage_data.get("weekly") or 0.0
+                s_reset = usage_data.get("s_reset")
+                w_reset = usage_data.get("w_reset")
 
                 session_g.labels(account=name).set(s_pct)
                 weekly_g.labels(account=name).set(w_pct)
                 status_g.labels(account=name).set(1)
                 USAGE_CACHE[name] = {
                     "session": s_pct, "weekly": w_pct,
-                    "updated": datetime.now().isoformat(), "status": "ok"
+                    "s_reset": s_reset, "w_reset": w_reset,
+                    "updated": get_taipei_time(), "status": "ok"
                 }
-                print(f"✅ {name} | Session: {s_pct}% | Weekly: {w_pct}%", flush=True)
+                print(f"✅ {name} | Session: {s_pct}% (Resets in: {s_reset}) | Weekly: {w_pct}% (Resets in: {w_reset})", flush=True)
             else:
                 status_g.labels(account=name).set(0)
                 USAGE_CACHE[name] = {
                     "session": None, "weekly": None,
-                    "updated": datetime.now().isoformat(), "status": "error",
+                    "s_reset": None, "w_reset": None,
+                    "updated": get_taipei_time(), "status": "error",
                     "error": "Could not parse usage data (cookies expired?)"
                 }
                 print(f"⚠️ {name}: Could not parse usage data", flush=True)
@@ -193,7 +208,8 @@ def run_scraper():
             status_g.labels(account=name).set(0)
             USAGE_CACHE[name] = {
                 "session": None, "weekly": None,
-                "updated": datetime.now().isoformat(), "status": "error",
+                "s_reset": None, "w_reset": None,
+                "updated": get_taipei_time(), "status": "error",
                 "error": str(e)
             }
             print(f"❌ {name} failed: {e}", flush=True)
@@ -221,13 +237,15 @@ def root():
     for name, data in USAGE_CACHE.items():
         status_icon = "✅" if data.get("status") == "ok" else "❌"
         session_val = f"{data.get('session', 'N/A')}%" if data.get("session") is not None else "N/A"
+        s_reset = data.get("s_reset") or "N/A"
         weekly_val = f"{data.get('weekly', 'N/A')}%" if data.get("weekly") is not None else "N/A"
+        w_reset = data.get("w_reset") or "N/A"
         updated = data.get("updated", "N/A")
         error = data.get("error", "")
-        rows += f"<tr><td>{status_icon}</td><td>{name}</td><td>{session_val}</td><td>{weekly_val}</td><td>{updated}</td><td style='color:#f87171;'>{error}</td></tr>"
+        rows += f"<tr><td>{status_icon}</td><td>{name}</td><td>{session_val}</td><td>{s_reset}</td><td>{weekly_val}</td><td>{w_reset}</td><td>{updated}</td><td style='color:#f87171;'>{error}</td></tr>"
 
     if not rows:
-        rows = "<tr><td colspan='6' style='text-align:center;color:#888;'>等待首次資料抓取中...</td></tr>"
+        rows = "<tr><td colspan='8' style='text-align:center;color:#888;'>等待首次資料抓取中...</td></tr>"
 
     cookie_counts = sum(1 for a in ACCOUNTS if os.getenv(f"OLLAMA_COOKIES_{a.get('name', '')}"))
     cookie_status = f"🍪 {cookie_counts}/{len(ACCOUNTS)} 已設定"
@@ -253,7 +271,7 @@ def root():
 <h1>📊 Ollama Usage Monitor</h1>
 <p class="subtitle">Monitoring {len(ACCOUNTS)} account(s) | Cookie: {cookie_status} | Auto-refresh {REFRESH_INTERVAL}s | Scrape {SCRAPE_INTERVAL}s</p>
 <table>
-  <tr><th>Status</th><th>Account</th><th>Session</th><th>Weekly</th><th>Updated</th><th>Error</th></tr>
+  <tr><th>Status</th><th>Account</th><th>Session usage</th><th>Session Reset</th><th>Weekly usage</th><th>Weekly Reset</th><th>Updated</th><th>Error</th></tr>
   {rows}
 </table>
 <p class="info">
