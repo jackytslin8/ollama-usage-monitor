@@ -233,51 +233,200 @@ def background_scheduler():
 
 @app.get("/")
 def root():
-    rows = ""
+    cards = ""
     for name, data in USAGE_CACHE.items():
-        status_icon = "✅" if data.get("status") == "ok" else "❌"
-        session_val = f"{data.get('session', 'N/A')}%" if data.get("session") is not None else "N/A"
+        status_ok = data.get("status") == "ok"
+        status_text = "Active" if status_ok else "Error"
+        status_color = "text-emerald-400" if status_ok else "text-rose-400"
+        
+        session_pct = data.get("session")
+        session_val_str = f"{session_pct}%" if session_pct is not None else "N/A"
         s_reset = data.get("s_reset") or "N/A"
-        weekly_val = f"{data.get('weekly', 'N/A')}%" if data.get("weekly") is not None else "N/A"
+        
+        weekly_pct = data.get("weekly")
+        weekly_val_str = f"{weekly_pct}%" if weekly_pct is not None else "N/A"
         w_reset = data.get("w_reset") or "N/A"
+        
         updated = data.get("updated", "N/A")
-        error = data.get("error", "")
-        rows += f"<tr><td>{status_icon}</td><td>{name}</td><td>{session_val}</td><td>{s_reset}</td><td>{weekly_val}</td><td>{w_reset}</td><td>{updated}</td><td style='color:#f87171;'>{error}</td></tr>"
+        error_msg = data.get("error", "")
+        
+        session_width = session_pct if session_pct is not None else 0
+        weekly_width = weekly_pct if weekly_pct is not None else 0
 
-    if not rows:
-        rows = "<tr><td colspan='8' style='text-align:center;color:#888;'>等待首次資料抓取中...</td></tr>"
+        # 色彩邏輯：使用量越高越危險
+        def get_progress_color(pct):
+            if pct is None: return "bg-slate-600"
+            if pct < 50: return "bg-emerald-500"
+            if pct < 80: return "bg-amber-500"
+            return "bg-rose-500"
+        
+        s_color = get_progress_color(session_pct)
+        w_color = get_progress_color(weekly_pct)
+        
+        error_html = f'<div class="mt-4 text-xs text-rose-400 bg-rose-950/30 p-2 rounded border border-rose-900/50 break-words">{error_msg}</div>' if error_msg and not status_ok else ''
+
+        cards += f"""
+        <div class="bg-slate-800/50 backdrop-blur-md rounded-xl p-6 border border-slate-700/50 shadow-xl hover:shadow-2xl hover:border-slate-600/50 transition-all duration-300 group">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold font-semibold text-slate-100 flex items-center gap-2">
+                    <span class="text-2xl group-hover:scale-110 transition-transform">🤖</span>
+                    {name}
+                </h3>
+                <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/50 border border-slate-700 border-opacity-50 {status_color} text-sm font-medium shadow-inner">
+                    <span class="relative flex h-2.5 w-2.5">
+                      {'<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>' if status_ok else ''}
+                      <span class="relative inline-flex rounded-full h-2.5 w-2.5 {'bg-emerald-500' if status_ok else 'bg-rose-500'}"></span>
+                    </span>
+                    {status_text}
+                </div>
+            </div>
+            
+            <div class="space-y-5">
+                <!-- Session Usage -->
+                <div class="space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400 font-medium tracking-wide">Session Usage</span>
+                        <span class="text-slate-200 font-bold">{session_val_str}</span>
+                    </div>
+                    <div class="h-2.5 w-full bg-slate-900/80 rounded-full overflow-hidden shadow-inner">
+                        <div class="h-full {s_color} rounded-full transition-all duration-1000 ease-out relative" style="width: {session_width}%">
+                            <div class="absolute top-0 left-0 right-0 bottom-0 bg-white/20" style="animation: shimmer 2s infinite linear;"></div>
+                        </div>
+                    </div>
+                    <div class="text-xs text-slate-500 text-right">Resets in: <span class="text-slate-400">{s_reset}</span></div>
+                </div>
+
+                <!-- Weekly Usage -->
+                <div class="space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400 font-medium tracking-wide">Weekly Usage</span>
+                        <span class="text-slate-200 font-bold">{weekly_val_str}</span>
+                    </div>
+                    <div class="h-2.5 w-full bg-slate-900/80 rounded-full overflow-hidden shadow-inner">
+                        <div class="h-full {w_color} rounded-full transition-all duration-1000 ease-out relative" style="width: {weekly_width}%">
+                            <div class="absolute top-0 left-0 right-0 bottom-0 bg-white/20" style="animation: shimmer 2s infinite linear;"></div>
+                        </div>
+                    </div>
+                    <div class="text-xs text-slate-500 text-right">Resets in: <span class="text-slate-400">{w_reset}</span></div>
+                </div>
+            </div>
+            
+            <div class="mt-6 pt-4 border-t border-slate-700/50 flex justify-between items-center text-xs text-slate-500">
+                <span>Updated: {updated}</span>
+            </div>
+            {error_html}
+        </div>
+        """
+
+    if not cards:
+        cards = """
+        <div class="col-span-full flex flex-col items-center justify-center py-20 px-4 text-center bg-slate-800/30 rounded-xl border border-slate-700/50 border-dashed">
+            <svg class="w-16 h-16 text-slate-600 mb-4 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <h3 class="text-lg font-medium text-slate-400 mb-1">Waiting for initial data...</h3>
+            <p class="text-slate-500">The scraper is gathering usage metrics</p>
+        </div>
+        """
 
     cookie_counts = sum(1 for a in ACCOUNTS if os.getenv(f"OLLAMA_COOKIES_{a.get('name', '')}"))
-    cookie_status = f"🍪 {cookie_counts}/{len(ACCOUNTS)} 已設定"
+    cookie_status = f"{cookie_counts}/{len(ACCOUNTS)} Configured"
 
     html = f"""<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8"><title>Ollama Usage Monitor</title>
-<meta http-equiv="refresh" content="{REFRESH_INTERVAL}">
-<style>
-  body {{ font-family: -apple-system, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; margin: 0; }}
-  h1 {{ color: #38bdf8; margin-bottom: 0.5rem; }}
-  .subtitle {{ color: #94a3b8; margin-bottom: 1.5rem; }}
-  table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-  th, td {{ padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #334155; }}
-  th {{ background: #1e293b; color: #94a3b8; font-weight: 600; }}
-  tr:hover {{ background: #1e293b; }}
-  .info {{ color: #64748b; margin-top: 1.5rem; font-size: 0.875rem; }}
-  .badge {{ display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }}
-  .badge-ok {{ background: #065f46; color: #6ee7b7; }}
-  .badge-err {{ background: #7f1d1d; color: #fca5a5; }}
-  a {{ color: #38bdf8; text-decoration: none; }} a:hover {{ text-decoration: underline; }}
-</style></head><body>
-<h1>📊 Ollama Usage Monitor</h1>
-<p class="subtitle">Monitoring {len(ACCOUNTS)} account(s) | Cookie: {cookie_status} | Auto-refresh {REFRESH_INTERVAL}s | Scrape {SCRAPE_INTERVAL}s</p>
-<table>
-  <tr><th>Status</th><th>Account</th><th>Session usage</th><th>Session Reset</th><th>Weekly usage</th><th>Weekly Reset</th><th>Updated</th><th>Error</th></tr>
-  {rows}
-</table>
-<p class="info">
-  API: <a href="/health">/health</a> | <a href="/metrics">/metrics</a> | <a href="/usage">/usage</a>
-</p>
-</body></html>"""
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Cloud Usage Monitor</title>
+    <meta http-equiv="refresh" content="{REFRESH_INTERVAL}">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {{
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+                radial-gradient(at 50% 0%, hsla(225,39%,30%,0.2) 0, transparent 50%), 
+                radial-gradient(at 100% 0%, hsla(339,49%,30%,0.2) 0, transparent 50%);
+            background-attachment: fixed;
+            min-height: 100vh;
+        }}
+        @keyframes shimmer {{
+            0% {{ transform: translateX(-100%); }}
+            100% {{ transform: translateX(100%); }}
+        }}
+        .glass-panel {{
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }}
+    </style>
+</head>
+<body class="text-slate-300 antialiased selection:bg-cyan-500/30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        
+        <!-- Header -->
+        <header class="mb-10 animate-[fadeIn_0.5s_ease-out]">
+            <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+                <div>
+                    <h1 class="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 tracking-tight mb-3">
+                        Ollama Monitor
+                    </h1>
+                    <p class="text-slate-400 text-lg max-w-2xl">
+                        Real-time cloud usage monitoring and analytics
+                    </p>
+                </div>
+                
+                <!-- System Status -->
+                <div class="glass-panel rounded-lg p-4 flex gap-6 items-center shadow-lg w-full md:w-auto overflow-x-auto">
+                    <div class="flex flex-col min-w-[70px]">
+                        <span class="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">Accounts</span>
+                        <span class="text-xl font-bold text-slate-200">{len(ACCOUNTS)}</span>
+                    </div>
+                    <div class="w-px h-10 bg-slate-700/50"></div>
+                    <div class="flex flex-col min-w-[90px]">
+                        <span class="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">Configured</span>
+                        <span class="text-xl font-bold text-slate-200">{cookie_status}</span>
+                    </div>
+                    <div class="w-px h-10 bg-slate-700/50"></div>
+                    <div class="flex flex-col min-w-[100px]">
+                        <span class="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">Refresh</span>
+                        <span class="text-sm font-medium text-cyan-400">{REFRESH_INTERVAL}s / {SCRAPE_INTERVAL}s</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <main>
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 auto-rows-max">
+                {cards}
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="mt-16 pt-8 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-500">
+            <div class="flex flex-wrap gap-4">
+                <a href="/health" class="hover:text-cyan-400 transition-colors flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Health API
+                </a>
+                <a href="/metrics" class="hover:text-cyan-400 transition-colors flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 13v-1m4 1v-3m4 3V8M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path></svg>
+                    Prometheus
+                </a>
+                <a href="/usage" class="hover:text-cyan-400 transition-colors flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                    Raw JSON
+                </a>
+            </div>
+            <div>
+                Built with FastAPI & Tailwind CSS
+            </div>
+        </footer>
+    </div>
+</body>
+</html>"""
     return HTMLResponse(content=html)
 
 
